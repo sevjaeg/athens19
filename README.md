@@ -1,2 +1,2 @@
 # athens19
-OpenCl at Telecom ParisTech
+OpenCL at Telecom ParisTech
