@@ -85,7 +85,7 @@ int main() {
 
     //--------------------------------------------------------------------
     //dimension of the matrix
-    const unsigned N = 1000;
+    const unsigned N = 1024;
 
     cl_mem input_a_buf; // num_devices elements
     cl_mem input_b_buf; // num_devices elements
@@ -183,9 +183,13 @@ int main() {
         for(unsigned j = 0; j < N; ++j) {
             int currentRow = N*i;
             ref_output[currentRow + j] = 0.0;
+            float sum = 0.0;
             for(unsigned k = 0; k<N; ++k) {
-                ref_output[currentRow + j] += input_a[currentRow + k]*input_b[N*k + j]; 
+                sum += input_a[currentRow + k]*input_b[N*k + j]; 
+                // alternatively transposed
+                //sum += input_a[currentRow + k]*input_b[N*j + k]; 
             }
+            ref_output[currentRow + j] = sum;
         }
     }
     clock_gettime(0, &end_time);
@@ -193,16 +197,18 @@ int main() {
 
     clEnqueueUnmapMemObject(queue,input_a_buf,input_a,0,NULL, NULL);
     clEnqueueUnmapMemObject(queue,input_b_buf,input_b,0,NULL, NULL);
-
-
-    clock_gettime(0, &start_time);
+    
     const size_t global_work_size[2]= {N, N};
+    const size_t local_work_size[2]= {16, 16};
+
+    // GPU calculation
+    clock_gettime(0, &start_time);
     status = clEnqueueNDRangeKernel(queue, kernel, 2, NULL,
-        global_work_size, NULL, 2, write_event, &kernel_event);
+        global_work_size, local_work_size, 2, write_event, &kernel_event);
     clWaitForEvents(1, &kernel_event);
     clock_gettime(0, &end_time);
-    diff = 1.0*(end_time.tv_sec - start_time.tv_sec)*1000 + 1.0/1000000 * (end_time.tv_nsec - start_time.tv_nsec);
 
+    diff = 1.0*(end_time.tv_sec - start_time.tv_sec)*1000 + 1.0/1000000 * (end_time.tv_nsec - start_time.tv_nsec);
     checkError(status, "Failed to launch kernel");
 
     clock_gettime(0, &start_time);
