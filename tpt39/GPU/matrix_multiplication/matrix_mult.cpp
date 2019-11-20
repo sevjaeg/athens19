@@ -85,7 +85,7 @@ int main() {
 
     //--------------------------------------------------------------------
     //dimension of the matrix
-    const unsigned N = 1024;
+    const unsigned N = 512;
 
     cl_mem input_a_buf; // num_devices elements
     cl_mem input_b_buf; // num_devices elements
@@ -199,7 +199,7 @@ int main() {
     clEnqueueUnmapMemObject(queue,input_b_buf,input_b,0,NULL, NULL);
     
     const size_t global_work_size[2]= {N, N};
-    const size_t local_work_size[2]= {16, 16};
+    const size_t local_work_size[2]= {1, 1};
 
     // GPU calculation
     clock_gettime(0, &start_time);

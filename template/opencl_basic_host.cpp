@@ -2,18 +2,24 @@
 #include <stdlib.h>
 
 #ifdef __APPLE__
-#include <OpenCL/cl.h>
+    #include <OpenCL/cl.h>
 #else
-#include <CL/cl.h>
+    #include <CL/cl.h>
 #endif
 
 // TODO: do i need this?
 #include <CL/cl_ext.h>
 
 
+// Documentation can be obtained from
+// https://www.khronos.org/registry/OpenCL/sdk/2.0/docs/man/xhtml/
+
+
 // structure following Jülich guideline
+// https://www.fz-juelich.de/SharedDocs/Downloads/IAS/JSC/EN/slides/opencl/opencl-03-basics.pdf?__blob=publicationFilehttps://www.fz-juelich.de/SharedDocs/Downloads/IAS/JSC/EN/slides/opencl/opencl-03-basics.pdf?__blob=publicationFile
 
 // TODO introduce some error handling
+// Code adapted from https://gist.github.com/courtneyfaulkner/7919509
 cl_int findPlatforms(cl_platform_id* platforms, cl_uint* platformCountPointer) {
     cl_uint i, j;
     char* info;
@@ -56,7 +62,8 @@ cl_int findPlatforms(cl_platform_id* platforms, cl_uint* platformCountPointer) {
     return 0;
 }
 
-cl_device_id obtainFirstDevice(cl_platform_id* platforms, cl_uint* platformCountPointer, int deviceIndex) {
+// Code adapted from https://gist.github.com/courtneyfaulkner/7919509
+cl_device_id obtainDevice(cl_platform_id* platforms, cl_uint* platformCountPointer, int deviceIndex) {
     cl_uint i, j;
     char* value;
     size_t valueSize;
@@ -126,24 +133,31 @@ cl_device_id obtainFirstDevice(cl_platform_id* platforms, cl_uint* platformCount
 int main() {
 
     // 1 Determine components
-    // Code from https://gist.github.com/courtneyfaulkner/7919509
     
         cl_uint platformCount;
         cl_platform_id* platforms;
+        
+        cl_platform_id platformToUse;
         cl_device_id deviceToUse;
+        cl_context context;
 
         // 1.1 Query platforms
 
         platforms = NULL;
         findPlatforms(platforms, &platformCount);
+        // arbitrarily selects the first one
+        platformToUse = platforms[0];
 
         // 1.2 Query devices
 
-        deviceToUse = obtainFirstDevice(platforms, &platformCount, 0);
+        // arbitrarily selects the first one
+        deviceToUse = obtainDevice(platforms, &platformCount, 0);
 
     // 2 Query specific component properties, adapt program accordingly
 
-        // 2.1 Create context for the devices
+        // 2.1 Create context for the device(s)
+        
+        context = clCreateContetxt(properties, 1, deviceToUse, NULL, NULL, NULL);
 
         // 2.2 Create queue
 
@@ -168,5 +182,4 @@ int main() {
 
         free(platforms);
         return 0;
-
 }

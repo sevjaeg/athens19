@@ -1,4 +1,4 @@
-#define N 1024
+#define N 512
 
 __kernel void matrix_mult(__global const float *A,
                         __global const float *B,
