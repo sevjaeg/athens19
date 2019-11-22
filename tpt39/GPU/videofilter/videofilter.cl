@@ -86,12 +86,12 @@ __kernel void sobel(__global const unsigned char *I,
         sumY -= I[N * (y-1) + x+1] * 3;
     }
 
-    if(sumX<0) sumX = 0;
-    if(sumY<0) sumY = 0;
+    if(sumX<0) sumX = -sumX;
+    if(sumY<0) sumY = -sumY;
   
-    thr = (sumX+sumY);
+    thr = (sumX+sumY)/2;
 
-    if(thr < 100) {
+    if(thr < 80) {
         out = 255;
     } else {
         out = I[N*y+x];
@@ -129,12 +129,12 @@ __kernel void sobelHR(__global const unsigned char *I,
         sumY -= I[N * (y-1) + x+1] * 3;
     }
 
-    if(sumX<0) sumX = 0;
-    if(sumY<0) sumY = 0;
+    if(sumX<0) sumX = -sumX;
+    if(sumY<0) sumY = -sumY;
   
     thr = sqrt(pow(sumX,2) + pow(sumY,2));
 
-    if(thr < 100) {
+    if(thr < 160) {
         out = 255;
     } else {
         out = I[N*y+x];
