@@ -3,5 +3,6 @@ __kernel void vector_add(__global const float *x,
                         __global float *restrict z)
 {
   size_t id = get_global_id(0);
+  
   z[id] = x[id] + y[id];
 }

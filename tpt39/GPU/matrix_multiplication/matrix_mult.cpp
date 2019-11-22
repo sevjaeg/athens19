@@ -8,6 +8,10 @@
 #define STRING_BUFFER_LEN 1024
 using namespace std;
 
+// 0 ... input matrix not transposed
+// 1 ... input matrix transposed
+# define TRANSPOSED 0
+
 void print_clbuild_errors(cl_program program,cl_device_id device) {
     cout<<"Program Build failed\n";
     size_t length;
@@ -84,8 +88,10 @@ int main() {
     cl_kernel kernel;
 
     //--------------------------------------------------------------------
-    //dimension of the matrix
-    const unsigned N = 1024;
+    // dimension of the matrix
+    const unsigned N = 512;
+    // workgroup size (N_WG*N_WG)
+    const unsigned N_WG = 8;
 
     cl_mem input_a_buf; // num_devices elements
     cl_mem input_b_buf; // num_devices elements
@@ -98,7 +104,7 @@ int main() {
     double diff, diffWrite, diffRead,diffCPU;
     cl_ulong start_nanos, end_nanos, diff_nanos;
 
-
+    // Setup platform
     clGetPlatformIDs(1, &platform, NULL);
     clGetPlatformInfo(platform, CL_PLATFORM_NAME, STRING_BUFFER_LEN, char_buffer, NULL);
     printf("%-40s = %s\n", "CL_PLATFORM_NAME", char_buffer);
@@ -107,11 +113,13 @@ int main() {
     clGetPlatformInfo(platform, CL_PLATFORM_VERSION, STRING_BUFFER_LEN, char_buffer, NULL);
     printf("%-40s = %s\n\n", "CL_PLATFORM_VERSION ", char_buffer);
 
+    // Setup context and queue
     context_properties[1] = (cl_context_properties)platform;
     clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
     context = clCreateContext(context_properties, 1, &device, NULL, NULL, NULL);
     queue = clCreateCommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, NULL);
 
+    // Setup program and kernel
     unsigned char **opencl_program=read_file("matrix_mult.cl");
     program = clCreateProgramWithSource(context, 1, (const char **)opencl_program, NULL, NULL);
      if (program == NULL)
@@ -127,7 +135,6 @@ int main() {
     input_a_buf = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
        N*N*sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for input A");
-
     input_b_buf = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
         N*N*sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for input B");
@@ -137,23 +144,20 @@ int main() {
         N*N*sizeof(float), NULL, &status);
     checkError(status, "Failed to create buffer for output");
 
-
     // Set kernel arguments.
     unsigned argi = 0;
-
     status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &input_a_buf);
     checkError(status, "Failed to set argument 1");
-
     status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &input_b_buf);
     checkError(status, "Failed to set argument 2");
-
     status = clSetKernelArg(kernel, argi++, sizeof(cl_mem), &output_buf);
     checkError(status, "Failed to set argument 3");
 
+    // Events for synchronization
     cl_event write_event[2];
     cl_event kernel_event;
 
-    //Map the inputs
+    // Map the inputs
     clock_gettime(0, &start_time);
     float * input_a = (float *)clEnqueueMapBuffer(queue, input_a_buf, CL_TRUE,
         CL_MAP_WRITE,0, N*N*sizeof(float), 0, NULL, &write_event[0], &errorcode);
@@ -163,11 +167,8 @@ int main() {
     checkError(errorcode, "Failed to map input B");
     clWaitForEvents(2, write_event);
     clock_gettime(0, &end_time);
-
     diffWrite = 1.0*(end_time.tv_sec - start_time.tv_sec)*1000 + 1.0/1000000 * (end_time.tv_nsec - start_time.tv_nsec);
-    checkError(errorcode, "Failed to transfer input A");
-    checkError(errorcode, "Failed to transfer input B");
-
+    
     //initialize inputs randomly
     for(unsigned i = 0; i < N; ++i) {
         for(unsigned j = 0; j < N; ++j) {
@@ -185,9 +186,12 @@ int main() {
             ref_output[currentRow + j] = 0.0;
             float sum = 0.0;
             for(unsigned k = 0; k<N; ++k) {
+            # if TRANSPOSED == 0    
                 sum += input_a[currentRow + k]*input_b[N*k + j]; 
-                // alternatively transposed
-                //sum += input_a[currentRow + k]*input_b[N*j + k]; 
+            # endif
+            # if TRANSPOSED == 1
+                sum += input_a[currentRow + k]*input_b[N*j + k]; 
+            # endif
             }
             ref_output[currentRow + j] = sum;
         }
@@ -195,11 +199,13 @@ int main() {
     clock_gettime(0, &end_time);
     diffCPU = 1.0*(end_time.tv_sec - start_time.tv_sec)*1000 + 1.0/1000000 * (end_time.tv_nsec - start_time.tv_nsec);
 
+    // Unmap
     clEnqueueUnmapMemObject(queue,input_a_buf,input_a,0,NULL, NULL);
     clEnqueueUnmapMemObject(queue,input_b_buf,input_b,0,NULL, NULL);
     
+    // define global and local workgroups
     const size_t global_work_size[2]= {N, N};
-    const size_t local_work_size[2]= {16, 16};
+    const size_t local_work_size[2]= {N_WG, N_WG};
 
     // GPU calculation
     clock_gettime(0, &start_time);
@@ -207,10 +213,10 @@ int main() {
         global_work_size, local_work_size, 2, write_event, &kernel_event);
     clWaitForEvents(1, &kernel_event);
     clock_gettime(0, &end_time);
-
-    diff = 1.0*(end_time.tv_sec - start_time.tv_sec)*1000 + 1.0/1000000 * (end_time.tv_nsec - start_time.tv_nsec);
     checkError(status, "Failed to launch kernel");
+    diff = 1.0*(end_time.tv_sec - start_time.tv_sec)*1000 + 1.0/1000000 * (end_time.tv_nsec - start_time.tv_nsec);
 
+    // Map output
     clock_gettime(0, &start_time);
     float * output = (float *)clEnqueueMapBuffer(queue, output_buf, CL_TRUE,
         CL_MAP_READ, 0,N*N*sizeof(float),  0, NULL, NULL, &errorcode);
@@ -229,7 +235,7 @@ int main() {
     printf ("GPU took %.2lfms (Write data).\n", diffWrite);
     printf ("GPU took %.2lfms (Kernel).\n", diff);
     printf ("GPU took %.2lfms (Read data).\n", diffRead);
-    printf ("Overall GPU time is %.2lfms.\n", diffRead + diffWrite + diff);
+    printf ("Overall GPU time is %.2lfms.\n\n", diffRead + diffWrite + diff);
     printf("GPU Kernel computation time (kernel only): %.2lfms\n", 1.0*diff_nanos/1000000);
 
     // Verify results.
@@ -256,7 +262,6 @@ int main() {
     clReleaseMemObject(output_buf);
     clReleaseProgram(program);
     clReleaseContext(context);
-
     clFinish(queue);
 
     return 0;

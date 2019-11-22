@@ -1,4 +1,9 @@
-#define N 1024
+// Problem size
+# define N 512
+
+// 0 ... input matrix not transposed
+// 1 ... input matrix transposed
+# define TRANSPOSED 0 
 
 __kernel void matrix_mult(__global const float *A,
                         __global const float *B,
@@ -10,11 +15,13 @@ __kernel void matrix_mult(__global const float *A,
   float sum =  0.0;
 
   for(unsigned i = 0; i<N; ++i) {
+  # if TRANSPOSED == 0
     sum += A[N*x + i]*B[N*i + y]; 
+  # endif
 
-    // alternatively transposed
-    //sum += A[N*x + i]*B[N*y + i]; 
+  # if TRANSPOSED == 1
+    sum += A[N*x + i]*B[N*y + i];
+  # endif
   }
-
   C[N*x + y] = sum;
 }
