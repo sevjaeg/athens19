@@ -181,7 +181,7 @@ char ** read_file(const char *name) {
 
 void checkError(int status, const char *msg) {
     if(status!=CL_SUCCESS) {
-        printf("%s\n",msg);
+     printf("%s\n",msg);
     }
 }
 
@@ -339,21 +339,19 @@ int main(int, char**)
         // Gauss 1
         status = clEnqueueNDRangeKernel(queue, kernelGauss, 2, NULL,
             global_work_size, local_work_size, 0, NULL, &kernelGauss_event[0]);
-        clWaitForEvents(1, &kernelGauss_event[0]);
         // swap in- and output
         status = clSetKernelArg(kernelGauss, 0, sizeof(cl_mem), &output_buf);
         status = clSetKernelArg(kernelGauss, 1, sizeof(cl_mem), &input_buf);
         // Gauss 2
         status = clEnqueueNDRangeKernel(queue, kernelGauss, 2, NULL,
             global_work_size, local_work_size, 0, NULL, &kernelGauss_event[0]);
-        clWaitForEvents(1, &kernelGauss_event[1]);
         // swap in- and output
         status = clSetKernelArg(kernelGauss, 0, sizeof(cl_mem), &input_buf);
         status = clSetKernelArg(kernelGauss, 1, sizeof(cl_mem), &output_buf);
         // Gauss 3
         status = clEnqueueNDRangeKernel(queue, kernelGauss, 2, NULL,
             global_work_size, local_work_size, 0, NULL, &kernelGauss_event[2]);
-        clWaitForEvents(1, &kernelGauss_event[2]);
+        clWaitForEvents(3, kernelGauss_event);
     #endif
     #if FILTERTYPE == 2 || FILTERTYPE == 3
         // Sobel

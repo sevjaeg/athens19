@@ -5,13 +5,16 @@
 /*
 Used Convolutional Kernels
 
+Gauß blur:
 https://en.wikipedia.org/wiki/Kernel_(image_processing)
 
 kernelGauss = 1/16 * {1,2,1,
                       2,4,2,
                       1,2,1}
 
+Schar edge detection
 https://docs.opencv.org/2.4/doc/tutorials/imgproc/imgtrans/sobel_derivatives/sobel_derivatives.html
+
 kernelScharX =       { -3,  0,  3,
                       -10,  0,  3,
                       -3,  0,  3}
@@ -43,16 +46,16 @@ __kernel void gauss(__global const unsigned char *I,
     // only filter non-edge pixels
     if(x != 0 && y != 0 && x != N-1 && y != M-1) {
         sum += I[N * (y-1) + x-1];
-        sum += I[N * (y-1) + x  ] * 2;
+        sum += I[N * (y-1) + x  ] << 1;
         sum += I[N * (y-1) + x+1];
-        sum += I[N * (y)   + x-1] * 2;
-        sum += I[N * (y)   + x  ] * 4;
-        sum += I[N * (y)   + x+1] * 2;
+        sum += I[N * (y)   + x-1] << 1;
+        sum += I[N * (y)   + x  ] << 2;
+        sum += I[N * (y)   + x+1] << 1;
         sum += I[N * (y+1) + x-1];
-        sum += I[N * (y+1) + x  ] * 2;
+        sum += I[N * (y+1) + x  ] << 1;
         sum += I[N * (y+1) + x+1];
     }  
-    O[x + N*y] = (unsigned char)(sum/16);
+    O[x + N*y] = (unsigned char)((sum+8) /16);
 }
 
 __kernel void sobel(__global const unsigned char *I,
