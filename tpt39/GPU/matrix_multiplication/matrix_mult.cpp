@@ -172,7 +172,7 @@ int main() {
     //initialize inputs randomly
     for(unsigned i = 0; i < N; ++i) {
         for(unsigned j = 0; j < N; ++j) {
-            input_a[N*i + j] = rand_float();
+            inputFmal_a[N*i + j] = rand_float();
             input_b[N*i + j] = rand_float();
         }
     }

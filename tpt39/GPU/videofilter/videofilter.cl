@@ -1,6 +1,7 @@
 #define N 640
 #define M 360
 
+
 /*
 Used Convolutional Kernels
 
