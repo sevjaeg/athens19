@@ -1,0 +1,5 @@
+Measurement
+timing starts after obtaining from camera and ends before writing to video
+with 299 frames
+CPU: 32.98 FPS (both filters)
+GPU: 174.18 FPS (local workgroup sizes 16 and 15, sobel filter not final)

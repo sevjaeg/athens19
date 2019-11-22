@@ -5,30 +5,19 @@
 #include <time.h>
 #include "opencv2/opencv.hpp"
 
-
 #include <CL/cl.h>
 #include <CL/cl_ext.h>
 
 using namespace cv;
 using namespace std;
 
-#define SHOW
-// 1 ... gauß, 2 ... sobel, else ... both
-#define FILTER 1
-
-void multiplyKernels(char* kernel1, char* kernel2, char* output) {
-	for(char i = 0; i < 3; ++i) {
-        for(char j = 0; j < 3; ++j) {
-            int currentRow = 3*i;
-            output[currentRow + j] = 0;
-            char sum = 0;
-            for(char k = 0; k<3; ++k) {
-                sum += kernel1[currentRow + k]*kernel2[3*k + j];
-            }
-            output[currentRow + j] = sum;
-        }
-    }
-}
+// FILTERTYPE
+// 0 ... none
+// 1 ... triple gauß
+// 2 ... sobel
+// 3 ... triple gauß and sobel
+#define FILTERTYPE 2
+#define N_FRAMES 300
 
 void copyArray(char* input, int len,  char* output) {
 	for(int i = 0; i <len; ++i) {
@@ -38,12 +27,13 @@ void copyArray(char* input, int len,  char* output) {
 
 // TODO introduce some error handling
 // Code adapted from https://gist.github.com/courtneyfaulkner/7919509
-cl_int findPlatforms(cl_platform_id* platforms, cl_uint* platformCountPointer) {
+cl_platform_id findPlatform() {
     cl_uint i, j;
     char* info;
     size_t infoSize;
 
-    cl_uint platformCount = *platformCountPointer;
+    cl_uint platformCount;
+    cl_platform_id* platforms;
 
     //Extensions are commented out (change array sizes to 5)
     const char* attributeNames[4] = { "Name", "Vendor",
@@ -77,11 +67,11 @@ cl_int findPlatforms(cl_platform_id* platforms, cl_uint* platformCountPointer) {
         }
         printf("\n");
     }
-    return 0;
+    return platforms[0];
 }
 
 // Code adapted from https://gist.github.com/courtneyfaulkner/7919509
-cl_device_id obtainDevice(cl_platform_id* platforms, cl_uint* platformCountPointer, int deviceIndex) {
+cl_device_id obtainDevice(cl_platform_id* platforms, cl_uint platformCount, int deviceIndex) {
     cl_uint i, j;
     char* value;
     size_t valueSize;
@@ -91,7 +81,6 @@ cl_device_id obtainDevice(cl_platform_id* platforms, cl_uint* platformCountPoint
     cl_device_id* devices = NULL;
     cl_device_id deviceToUse;
 
-    cl_uint platformCount = *platformCountPointer;
 
     for (i = 0; i < platformCount; i++) {
         cl_device_type devices_to_search_for = CL_DEVICE_TYPE_GPU; //ALL
@@ -201,37 +190,10 @@ int main(int, char**)
 	const int RESX = 640;
 	const int RESY = 360;
 
-	char* inputFrame = (char*) malloc(RESY*RESX*sizeof(char));
-	char* filteredFrame = (char*) malloc(RESY*RESX*sizeof(char));
-
-	// Setup of filters
-	char filterKernel[9] = {};
-	char *filterFactor;
-
-	char kernelGauss[9] = {1,2,1,
-						2,4,2,
-						1,2,1};
-	char factorGauss = 16;
-
-	/*char kernelSobel[9] = {-1,-1,-1,
-						-1, 8,-1,
-						-1, 1,-1};
-	char factorSobel = 1;*/
-
-	if(FILTER == 1) {
-		copyArray(kernelGauss, 3, filterKernel);
-		*filterFactor = factorGauss;
-	} /*else if (FILTER == 2) {
-		copyArray(kernelSobel, 3, filterKernel);
-		*filterFactor = factorSobel;
-	} else {
-		multiplyKernels(kernelGauss, kernelSobel, filterKernel);
-		*filterFactor = factorGauss*factorSobel;
-	}*/
+	unsigned char* inputFrame;
+	unsigned char* filteredFrame = (unsigned char*) malloc(RESY*RESX*sizeof(char));
 
 	// OpenCL setup
-	cl_uint platformCount;
-	cl_platform_id* platforms;
 	cl_platform_id platformToUse;
 	cl_device_id device;
 	cl_context context;
@@ -244,83 +206,72 @@ int main(int, char**)
 	};
 	cl_command_queue queue;
 	cl_program program;
-	cl_kernel kernel;
-	cl_int errorcode;
+
+#if FILTERTYPE == 0
+    cl_kernel kernelTunnel;
+    cl_event kernelTunnel_event;
+#endif
+#if FILTERTYPE == 1 || FILTERTYPE == 3
+    cl_kernel kernelGauss;
+    cl_event kernelGauss_event[3];
+#endif
+#if FILTERTYPE == 2 || FILTERTYPE == 3
+    cl_kernel kernelSobel;
+    cl_event kernelSobel_event;
+#endif
+
 	int status;
+	cl_mem input_buf, output_buf;
+	
+	platformToUse = findPlatform();
 
-    cl_event kernel_event;
-
-	cl_mem input_buf, filter_buf, factor_buf, output_buf;
-
-	platforms = NULL;
-	findPlatforms(platforms, &platformCount);
-
-	platformToUse = platforms[0];
-
-	device = obtainDevice(platforms, &platformCount, 0);
+	device = obtainDevice(&platformToUse, 1, 0);
 
 	context_properties[1] = (cl_context_properties)platformToUse;
 	context = clCreateContext(context_properties, 1, &device, NULL, NULL, NULL);
 	queue = clCreateCommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, NULL);
 	char **opencl_program=read_file("videofilter.cl");
     program = clCreateProgramWithSource(context, 1, (const char **)opencl_program, NULL, NULL);
-     if (program == NULL)
-      {
-             printf("Program creation failed\n");
-             return 1;
-      }
-     int success=clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-     if(success!=CL_SUCCESS) print_clbuild_errors(program,device);
-     kernel = clCreateKernel(program, "filter", NULL);
-
+    if (program == NULL)
+    {
+            printf("Program creation failed\n");
+            return 1;
+    }
+    int success=clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+    if(success!=CL_SUCCESS) print_clbuild_errors(program,device);
+    
 	// Input buffers
     input_buf = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
        RESX*RESY*sizeof(char), NULL, &status);
     checkError(status, "Failed to create buffer for input A");
-
-    filter_buf = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-        9*sizeof(char), NULL, &status);
-    checkError(status, "Failed to create buffer for input B");
-
-    factor_buf = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-    	sizeof(char), NULL, &status);
-    checkError(status, "Failed to create buffer for output");
 
 	// Output buffer.
     output_buf = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
         RESX*RESY*sizeof(char), NULL, &status);
     checkError(status, "Failed to create buffer for output");
 
-	// Kernel setup
-
-	status = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input_buf);
+    // Kernel setup
+#if FILTERTYPE == 0
+    kernelTunnel = clCreateKernel(program, "tunnel", NULL);
+    status = clSetKernelArg(kernelTunnel, 0, sizeof(cl_mem), &input_buf);
     checkError(status, "Failed to set argument 0");
-
-    status = clSetKernelArg(kernel, 1, sizeof(cl_mem), &filter_buf);
+    status = clSetKernelArg(kernelTunnel, 1, sizeof(cl_mem), &output_buf);
     checkError(status, "Failed to set argument 1");
-
-    status = clSetKernelArg(kernel, 2, sizeof(cl_mem), &factor_buf);
-    checkError(status, "Failed to set argument 2");
-
-    status = clSetKernelArg(kernel, 3, sizeof(cl_mem), &output_buf);
-    checkError(status, "Failed to set argument 3");
-
-    // Input mapping
-	char * input = (char *)clEnqueueMapBuffer(queue, input_buf, CL_TRUE,
-        CL_MAP_WRITE,0, RESX*RESY*sizeof(char), 0, NULL, NULL, &errorcode);
-    checkError(errorcode, "Failed to map input");
-    char * filter = (char *)clEnqueueMapBuffer(queue, filter_buf, CL_TRUE,
-        CL_MAP_WRITE,0, 9*sizeof(char), 0, NULL, NULL, &errorcode);
-    checkError(errorcode, "Failed to map filter");
-	char * factor = (char *)clEnqueueMapBuffer(queue, factor_buf, CL_TRUE,
-        CL_MAP_WRITE,0, sizeof(char), 0, NULL, NULL, &errorcode);
-    checkError(errorcode, "Failed to map factor");
-	char * output = (char *)clEnqueueMapBuffer(queue, output_buf, CL_TRUE,
-        CL_MAP_WRITE,0, RESX*RESY*sizeof(char), 0, NULL, NULL, &errorcode);
-    checkError(errorcode, "Failed to map output");
-
-	
-
+#endif
+#if FILTERTYPE == 1 || FILTERTYPE == 3
+    kernelGauss = clCreateKernel(program, "gauss", NULL);
+    status = clSetKernelArg(kernelGauss, 0, sizeof(cl_mem), &input_buf);
+    checkError(status, "Failed to set argument 0");
+    status = clSetKernelArg(kernelGauss, 1, sizeof(cl_mem), &output_buf);
+    checkError(status, "Failed to set argument 1");
+#endif
+#if FILTERTYPE == 2 || FILTERTYPE == 3
+    kernelSobel = clCreateKernel(program, "sobel", NULL);
+    status = clSetKernelArg(kernelSobel, 0, sizeof(cl_mem), &input_buf);
+    checkError(status, "Failed to set argument 0");
+    status = clSetKernelArg(kernelSobel, 1, sizeof(cl_mem), &output_buf);
+    checkError(status, "Failed to set argument 1");
+#endif
 
 	// Video setup
     VideoCapture camera("./bourne.mp4");
@@ -331,7 +282,6 @@ int main(int, char**)
     int ex = static_cast<int>(CV_FOURCC('M','J','P','G'));
     Size S = Size((int) camera.get(CV_CAP_PROP_FRAME_WIDTH),    // Acquire input size
                   (int) camera.get(CV_CAP_PROP_FRAME_HEIGHT));
-	//Size S =Size(1280,720);
 	cout << "SIZE:" << S << endl;
 	
     VideoWriter outputVideo;                                        // Open the output
@@ -342,72 +292,106 @@ int main(int, char**)
         cout  << "Could not open the output video for write: " << NAME << endl;
         return -1;
     }
-	time_t start,end;
-	double diff,tot;
-	int count=0;
-	const char *windowName = "filter";   // Name shown in the GUI window.
-    #ifdef SHOW
-    namedWindow(windowName); // Resizable window, might not work on Windows.
-    #endif
+	double diff;
+    double tot = 0;
+    struct timespec start_time, end_time;
+
+    Mat cameraFrame, displayFrame;
 
 	// Framewise computation
-
-    while (true) {
-        Mat cameraFrame,displayframe;
-		count=count+1;
-		if(count > 299) break;
+    for (int count=0; count < N_FRAMES; count ++) {
+        // Obtain frame
         camera >> cameraFrame;
-        Mat filterframe = Mat(cameraFrame.size(), CV_8UC3);
-        Mat grayframe, edge_x,edge_y,edge,edge_inv;
 
+        clock_gettime(0, &start_time);
+        Mat grayframe;
     	cvtColor(cameraFrame, grayframe, CV_BGR2GRAY);
 
-		//TODO hinig, geht sicher irgendwie
-		//copyMakeBorder(grayframe, greyframePadded, 1, 1, 1, 1, BORDER_REPLICATE);
+		//TODO border
+		//copyMakeBorder(grayframe, grayframe, 1, 1, 1, 1, BORDER_REPLICATE);
 
 		// Mat to array
-		
-		//TODO modularity
-		memcpy(inputFrame, (char*)grayframe.data, displayframe.step * displayframe.rows * sizeof(char));
+        inputFrame = (unsigned char *)grayframe.data;
+        
+        // Write data to memory
+        status = clEnqueueWriteBuffer(queue, input_buf, CL_TRUE,
+            0, RESX*RESY*sizeof(char), inputFrame, 0, NULL, NULL);
+        checkError(status, "Failed to transfer input");
 
-		/*
-		time (&start);
-    	GaussianBlur(grayframe, grayframe, Size(3,3),0,0);
-    	GaussianBlur(grayframe, grayframe, Size(3,3),0,0);
-    	GaussianBlur(grayframe, grayframe, Size(3,3),0,0);
-		Scharr(grayframe, edge_x, CV_8U, 0, 1, 1, 0, BORDER_DEFAULT );
-		Scharr(grayframe, edge_y, CV_8U, 1, 0, 1, 0, BORDER_DEFAULT );
-		addWeighted( edge_x, 0.5, edge_y, 0.5, 0, edge );
-        threshold(edge, edge, 80, 255, THRESH_BINARY_INV);
-		time (&end);
-		*/
-	
-        //cvtColor(edge, edge_inv, CV_GRAY2BGR);
+        // Kernel
+        const size_t global_work_size[2]= {RESX, RESY};
+        const size_t local_work_size[2]= {16, 15};
 
-
-    	// Clear the output image to black, so that the cartoon line drawings will be black (ie: not drawn).
+    #if FILTERTYPE == 0
+        status = clEnqueueNDRangeKernel(queue, kernelTunnel, 2, NULL,
+        global_work_size, local_work_size, 0, NULL, &kernelTunnel_event);
+        clWaitForEvents(1, &kernelTunnel_event);
+    #endif
+    #if FILTERTYPE == 1 || FILTERTYPE == 3
+        // Gauss 1
+        status = clEnqueueNDRangeKernel(queue, kernelGauss, 2, NULL,
+            global_work_size, local_work_size, 0, NULL, &kernelGauss_event[0]);
+        clWaitForEvents(1, &kernelGauss_event[0]);
+        // swap in- and output
+        status = clSetKernelArg(kernelGauss, 0, sizeof(cl_mem), &output_buf);
+        status = clSetKernelArg(kernelGauss, 1, sizeof(cl_mem), &input_buf);
+        // Gauss 2
+        status = clEnqueueNDRangeKernel(queue, kernelGauss, 2, NULL,
+            global_work_size, local_work_size, 0, NULL, &kernelGauss_event[0]);
+        clWaitForEvents(1, &kernelGauss_event[1]);
+        // swap in- and output
+        status = clSetKernelArg(kernelGauss, 0, sizeof(cl_mem), &input_buf);
+        status = clSetKernelArg(kernelGauss, 1, sizeof(cl_mem), &output_buf);
+        // Gauss 3
+        status = clEnqueueNDRangeKernel(queue, kernelGauss, 2, NULL,
+            global_work_size, local_work_size, 0, NULL, &kernelGauss_event[2]);
+        clWaitForEvents(1, &kernelGauss_event[2]);
+    #endif
+    #if FILTERTYPE == 2 || FILTERTYPE == 3
+        // Sobel
+        status = clEnqueueNDRangeKernel(queue, kernelSobel, 2, NULL,
+        global_work_size, local_work_size, 0, NULL, &kernelSobel_event);
+        clWaitForEvents(1, &kernelSobel_event);
+    #endif  
+        // Read output
+        status = clEnqueueReadBuffer(queue, output_buf, CL_TRUE,
+            0, RESX*RESY*sizeof(char), filteredFrame, 0, NULL, NULL);
+        checkError(status, "Failed to transfer output");
     	
-		//TODO convert array to frames
-		memcpy((char*)grayframe.data, filteredFrame, displayframe.step * displayframe.rows*sizeof(char));
+		// array to Mat
+        displayFrame = Mat(grayframe.size().height, grayframe.size().width, CV_8U, filteredFrame);
+        cvtColor(displayFrame, displayFrame, CV_GRAY2BGR);
 
-		memset((char*)displayframe.data, 0, displayframe.step * displayframe.rows);
-		grayframe.copyTo(displayframe);
-		outputVideo << displayframe;
-	#ifdef SHOW
-        imshow(windowName, displayframe);
-	#endif
-		diff = difftime (end,start);
+        clock_gettime(0, &end_time);
+		outputVideo << displayFrame;
+
+        diff =  1.0*(end_time.tv_sec - start_time.tv_sec)*1000 + 1.0/1000000 * (end_time.tv_nsec - start_time.tv_nsec);
 		tot+=diff;
 	}
 	outputVideo.release();
 	camera.release();
-  	printf ("FPS %.2lf .\n", 299.0/tot );
+    printf("Runtime = %.2lfms\n", tot);
+  	printf ("FPS %.2lf .\n", 1000*(N_FRAMES-1)/tot);
 
+    //Cleanup
+#if FILTERTYPE == 0
+    clReleaseKernel(kernelTunnel);
+#endif
+#if FILTERTYPE == 1 || FILTERTYPE == 3
+     clReleaseKernel(kernelGauss);
+#endif
+#if FILTERTYPE == 2 || FILTERTYPE == 3
+     clReleaseKernel(kernelSobel);
+#endif
 
-	free(inputFrame);
+    clReleaseCommandQueue(queue);
+    clReleaseMemObject(input_buf);
+    clReleaseMemObject(output_buf);
+    clReleaseProgram(program);
+    clReleaseContext(context);
+    clFinish(queue);
+
 	free(filteredFrame);
-	free(platforms);
-
 
     return EXIT_SUCCESS;
 
