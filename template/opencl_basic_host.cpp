@@ -18,7 +18,7 @@
 // structure following Jülich guideline
 // https://www.fz-juelich.de/SharedDocs/Downloads/IAS/JSC/EN/slides/opencl/opencl-03-basics.pdf?__blob=publicationFilehttps://www.fz-juelich.de/SharedDocs/Downloads/IAS/JSC/EN/slides/opencl/opencl-03-basics.pdf?__blob=publicationFile
 
-// TODO introduce some error handling
+// TODO: introduce some error handling
 // Code adapted from https://gist.github.com/courtneyfaulkner/7919509
 cl_int findPlatforms(cl_platform_id* platforms, cl_uint* platformCountPointer) {
     cl_uint i, j;
@@ -42,8 +42,14 @@ cl_int findPlatforms(cl_platform_id* platforms, cl_uint* platformCountPointer) {
     platforms = (cl_platform_id*) malloc(sizeof(cl_platform_id) * platformCount);
     clGetPlatformIDs(platformCount, platforms, NULL);
 
+    if(platformCount == 0){
+        printf("no platform found\n");
+        return 1;
+    }
+
     // for each platform print all attributes
     for (i = 0; i < platformCount; i++) {
+         
         printf("\n %d. Platform \n", i+1);
         for (j = 0; j < attributeCount; j++) {
 
@@ -131,6 +137,9 @@ cl_device_id obtainDevice(cl_platform_id* platforms, cl_uint* platformCountPoint
 }
 
 int main() {
+    printf("start\n");
+
+    cl_int platformNotFound;
 
     // 1 Determine components
     
@@ -144,20 +153,26 @@ int main() {
         // 1.1 Query platforms
 
         platforms = NULL;
-        findPlatforms(platforms, &platformCount);
-        // arbitrarily selects the first one
-        platformToUse = platforms[0];
+        printf("obtaining platforms\n");
+        platformNotFound = findPlatforms(platforms, &platformCount);
+        // arbitrarily selects the first one (if found)
+        if(!platformNotFound) {
+            platformToUse = platforms[0];
+        }
+       
+        
 
         // 1.2 Query devices
 
         // arbitrarily selects the first one
-        deviceToUse = obtainDevice(platforms, &platformCount, 0);
+        printf("obtaining devices\n");
+        //deviceToUse = obtainDevice(platforms, &platformCount, 0);
 
     // 2 Query specific component properties, adapt program accordingly
 
         // 2.1 Create context for the device(s)
         
-        context = clCreateContetxt(properties, 1, deviceToUse, NULL, NULL, NULL);
+        //context = clCreateContetxt(properties, 1, deviceToUse, NULL, NULL, NULL);
 
         // 2.2 Create queue
 
